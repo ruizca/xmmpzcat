@@ -12,9 +12,10 @@ Dependencies:
 numpy
 scipy
 astropy
-astroquery (use ukidss and vista modules from my repository)
+astroquery (use ukidss and vista modules in my repository)
 pymocs
 healpy
 astropy_healpix
 tqdm
+MLZ (use the python 3version in my repository)
 
