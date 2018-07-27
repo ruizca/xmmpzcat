@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 
-from astropy import wcs
 from astropy.coordinates import SkyCoord, ICRS
 from astropy import units as u
 from astropy_healpix import HEALPix
@@ -97,25 +96,6 @@ def stars_moc(field, radius, moc_order=15):
             moc_stars += catalog_to_moc(coord, r, moc_order)
 
     return moc_stars
-
-
-def obsid_wcs(coords):
-    """
-    WCS object with a gnomonic projection centered in coords.
-    """
-    # Create a new WCS object.  The number of axes must be set
-    # from the start
-    w = wcs.WCS(naxis=2)
-
-    # Set up an "gnomonic" projection (as in XMM EPIC images)
-    # Vector properties may be set with Python lists, or Numpy arrays
-    w.wcs.crpix = [2.98436767602103E+02, 2.98436767602103E+02]
-    w.wcs.cdelt = np.array([-1.20833333333333E-03, 1.20833333333333E-03])
-    w.wcs.crval = [coords.ra.deg, coords.dec.deg]
-    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    w.wcs.set_pv([(2, 1, 0.0)])
-
-    return w
 
 
 def reg2moc(region, moc_field, wcs, moc_order=15):
