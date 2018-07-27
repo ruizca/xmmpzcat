@@ -61,25 +61,28 @@ def get_moc(url, survey, folder):
     """
     Get the moc of the area covered by survey from url and store it in folder.
     """
-    if survey is 'UKIDSS' :
+    if survey is 'UKIDSS':
         filenameJ = 'las-J1-DR10.fits'
         filenameH = 'las-H-DR10.fits'
         filenameK = 'las-K-DR10.fits'
 
-    elif survey is 'VISTA' :
+    elif survey is 'VISTA':
         filenameJ = 'vhs-J-dr4.fits'
         filenameH = 'vhs-H-dr4.fits'
         filenameK = 'vhs-Ks-dr4.fits'
         
-    elif survey is '2MASS' :
+    elif survey is '2MASS':
         return None
     
-    else :
+    elif survey is 'sdss':
+        downloadFile(url, folder, 'moc_{}.fits'.format(survey.lower()))
+        
+    else:
         raise ValueError('Invalid near-infrared survey!')
 
     filename = os.path.join(folder, 'moc_{}.fits'.format(survey.lower()))
 
-    if not os.path.isfile(filename) :
+    if not os.path.isfile(filename):
         # J moc
         moc_J = MOC()  
         downloadFile(os.path.join(url, filenameJ), folder)
