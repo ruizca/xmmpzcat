@@ -3,9 +3,9 @@
 import os
 import numpy as np
 import subprocess as sp
-from tqdm import tqdm
 
 from astropy.table import Table, vstack, join, setdiff
+from tqdm import tqdm
 
 import xmatch_http as xm
 

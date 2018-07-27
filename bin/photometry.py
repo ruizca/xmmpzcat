@@ -12,13 +12,17 @@ import time
 
 from bs4 import BeautifulSoup
 from io import BytesIO
-from tqdm import trange
+from tqdm import trange, tqdm
 
 from astropy.table import Table, join, unique, vstack, hstack
 from astropy.coordinates import SkyCoord
 from astroquery.irsa_dust import IrsaDust
+from astroquery.sdss import SDSS
 
 import casjobs
+
+# Table from Schlafly and Finkbeiner (2011) + IRSA data
+extdata = Table.read('sfextdata.tex', format='latex')
 
 
 def pstarrs(srcids):
@@ -27,19 +31,19 @@ def pstarrs(srcids):
 
     filters = ['g', 'r', 'i', 'z', 'y']
     cols_mflags = ''.join(['m.{}Flags, '.format(f) for f in filters])
-    cols_mPSFMag = ''.join(['m.{0}MeanPSFMag, m.{0}MeanPSFMagErr, '.format(f) 
+    cols_mPSFMag = ''.join(['m.{0}MeanPSFMag, m.{0}MeanPSFMagErr, '.format(f)
                             for f in filters])
-    cols_mKronMag = ''.join(['m.{0}MeanKronMag, m.{0}MeanKronMagErr, '.format(f) 
-                            for f in filters])
+    cols_mKronMag = ''.join(['m.{0}MeanKronMag, m.{0}MeanKronMagErr, '.format(f)
+                             for f in filters])
     cols_mApMag = 'm.rMeanApMag, m.rMeanApMagErr, m.iMeanApMag, m.iMeanApMagErr'
 
     cols_infoflags = ''.join(['t.{}infoFlag, '.format(f) for f in filters])
-    cols_PSFMag = ''.join(['t.{0}PSFMag, t.{0}PSFMagErr, '.format(f) 
+    cols_PSFMag = ''.join(['t.{0}PSFMag, t.{0}PSFMagErr, '.format(f)
+                           for f in filters])
+    cols_KronMag = ''.join(['t.{0}KronMag, t.{0}KronMagErr, '.format(f)
                             for f in filters])
-    cols_KronMag = ''.join(['t.{0}KronMag, t.{0}KronMagErr, '.format(f) 
-                            for f in filters])
-    cols_ApMag = 't.rApMag, t.rApMagErr, t.iApMag, t.iApMagErr'    
-    
+    cols_ApMag = 't.rApMag, t.rApMagErr, t.iApMag, t.iApMagErr'
+
     # Get stack photometry
     cols = 't.objid, t.bestDetection, {}{}{}{}'
     cols = cols.format(cols_infoflags, cols_PSFMag, cols_KronMag, cols_ApMag)
@@ -51,20 +55,20 @@ def pstarrs(srcids):
     casjobs.run_qry(qry, 'stackPhoto')
 
     casjobs.get_table('xmatch_objids_stackPhoto')
-    
+
     photo_stack = Table.read('xmatch_objids_stackPhoto.fits', memmap=True)
 
     # remove duplicate sources
     photo_stack.add_column(-photo_stack['rPSFMag'], name='mr')
     photo_stack.sort('mr')
-    photo_stack.remove_column('mr')    
+    photo_stack.remove_column('mr')
     photo_stack = unique(photo_stack, keys='objid')
 
     # Get mean photometry
     cols = 'o.objid, o.raMean, o.decMean, o.surveyID, '
     cols += 'o.objInfoFlag, o.qualityFlag, {}{}{}{}'
     cols = cols.format(cols_mflags, cols_mPSFMag, cols_mKronMag, cols_mApMag)
-    
+
     qry = 'select {} from MyDB.xmatch_objids s '.format(cols)
     qry += 'inner join ObjectThin o on o.objid=s.PSobjID '
     qry += 'inner join MeanObject m on o.objid=m.objid and o.uniquePspsOBid=m.uniquePspsOBid '
@@ -72,26 +76,23 @@ def pstarrs(srcids):
     casjobs.run_qry(qry, 'meanPhoto')
 
     casjobs.get_table('xmatch_objids_meanPhoto')
-    
+
     photo_mean = Table.read('xmatch_objids_meanPhoto.fits', memmap=True)
 
     # Clean temp files
     casjobs.drop_table('xmatch_objids_stackPhoto')
-    casjobs.drop_table('xmatch_objids_meanPhoto')    
+    casjobs.drop_table('xmatch_objids_meanPhoto')
     casjobs.drop_table('xmatch_objids')
     os.remove('xmatch_objids_meanPhoto.fits')
     os.remove('xmatch_objids_stackPhoto.fits')
-    
-    photo = join(photo_mean, photo_stack, join_type='left', keys='objid')
-    
-    return photo
+
+    return join(photo_mean, photo_stack, join_type='left', keys='objid')
 
 
 def pstarrs_clean(photo):
-    
     filters = ['g', 'r', 'i', 'z', 'y']
     msk_ptl = (photo['objInfoFlag'] & 0x00800000) == 0
-    
+
     good_stack = np.zeros((len(photo), len(filters)))
     good_mean = np.zeros((len(photo), len(filters)))
     
@@ -103,17 +104,21 @@ def pstarrs_clean(photo):
         mag[msk_ptl] = photo[msk_ptl][f + 'PSFMag']
         magErr = photo[f + 'KronMagErr']
         magErr[msk_ptl] = photo[msk_ptl][f + 'PSFMagErr']
-                
-        photo.add_column(Table.Column(mag), name=stack_colname)
-        photo.add_column(Table.Column(magErr), name=stack_colname + 'Err')
+
+        photo[stack_colname] = mag
+        photo[stack_colname + 'Err'] = magErr
+        #photo.add_column(Table.Column(mag), name=stack_colname)
+        #photo.add_column(Table.Column(magErr), name=stack_colname + 'Err')
 
         mag = photo[f + 'MeanKronMag']
         mag[msk_ptl] = photo[msk_ptl][f + 'MeanPSFMag']
         magErr = photo[f + 'MeanKronMagErr']
         magErr[msk_ptl] = photo[msk_ptl][f + 'MeanPSFMagErr']
-                
-        photo.add_column(Table.Column(mag), name=mean_colname)
-        photo.add_column(Table.Column(magErr), name=mean_colname + 'Err')
+
+        photo[mean_colname] = mag
+        photo[mean_colname + 'Err'] = magErr
+        #photo.add_column(Table.Column(mag), name=mean_colname)
+        #photo.add_column(Table.Column(magErr), name=mean_colname + 'Err')
         
         msk_good = np.logical_and(photo[stack_colname] > 0,
                                   photo[stack_colname + 'Err'] > 0)        
@@ -127,18 +132,19 @@ def pstarrs_clean(photo):
     n_mean = np.sum(good_mean, axis=1)
     msk_stack = np.logical_and(~photo['bestDetection'].mask,
                                n_stack >= n_mean)
-    photo.add_column(Table.Column(msk_stack), name='stack')
+    photo['stack'] = msk_stack
+    #photo.add_column(Table.Column(msk_stack), name='stack')
     
-    for f in filters :
-        colname = '{}Mag'.format(f)
-        
+    for f in filters:
         mag = photo['mean_{}Mag'.format(f)]
         mag[msk_stack] = photo[msk_stack]['stack_{}Mag'.format(f)]
         magErr = photo['mean_{}MagErr'.format(f)]
         magErr[msk_stack] = photo[msk_stack]['stack_{}MagErr'.format(f)]
 
-        photo.add_column(Table.Column(mag), name=colname)
-        photo.add_column(Table.Column(magErr), name=colname + 'Err')
+        photo['{}Mag'.format(f)] = mag
+        photo['{}MagErr'.format(f)] = magErr
+        #photo.add_column(Table.Column(mag), name='{}Mag'.format(f))
+        #photo.add_column(Table.Column(magErr), name='{}MagErr'.format(f))
 
     photo.keep_columns(['objid', 'objInfoFlag', 'qualityFlag', 'stack',
                         'gMag', 'rMag', 'iMag', 'zMag', 'yMag', 
@@ -151,37 +157,47 @@ def query_wsa(srcids, columns='ra,dec', constraints='sourceID=u.NIRobjID',
               url='http://wsa.roe.ac.uk:8080/wsa/WSASQL'):
 
     Table([srcids]).write('temp.fits', format='fits', overwrite=True)
-
     qry = 'SELECT {} FROM {}, #userTable as u WHERE {}'
     qry = qry.format(columns, table, constraints)
-    payload = {'database': database, 
+    payload = {'database': database,
                'formaction': 'freeform',
                'uploadSQLFile': '',
                'sqlstmt': qry,
                'iFmt': 'FITS',
-               'emailAddress': '', 
+               'emailAddress': '',
                'format': 'FITS',
                'compress': 'NONE',
                'rows': 2,
                'timeout': 10800}
-    file = {'uploadFileToTable': open('temp.fits','rb')}
-    r = requests.post(url, files=file, data=payload)
+    upfile = {'uploadFileToTable': open('temp.fits','rb')}
+    r = requests.post(url, files=upfile, data=payload)
     os.remove('temp.fits')    
-    
+
     soup = BeautifulSoup(r.text, "html5lib")
     dl = soup.find('a', id='dl_id')
     r = requests.get(dl['href'])
-    
+
     return Table.read(BytesIO(r.content), format='fits')
     
-def wise(srcids, columns='cntr,w1mpro,w2mpro'):
+
+def sdss(srcids, columns='cntr,w1mpro,w2mpro', wsid_column='SDSSID'):
+    
+    photo = SDSS.query_sql('select top 10 z, ra, dec, bestObjID')
+    print(photo)
+    
+def wise(srcids, columns='cntr,w1mpro,w2mpro', wsid_column='WSID'):
 
     columns = ''.join(['w.{}, '.format(s.replace(' ', '')) 
                        for s in columns.split(',')]).rstrip(', ')
 
-    photo = query_wsa(srcids, columns=columns, constraints='w.cntr=u.WSID',
+#    photo = query_wsa(srcids, columns=columns, constraints='w.cntr=u.WSID',
+#                      table='WISE..allwise_sc as w')
+    photo = query_wsa(srcids, columns=columns, 
+                      constraints='w.cntr=u.{}'.format(wsid_column), 
                       table='WISE..allwise_sc as w')
+
     return photo
+
 
 def tmass(srcids, columns='cntr,w1mpro,w2mpro'):
 
@@ -267,17 +283,66 @@ def merge(catalogue, photo_ps, photo_ws, photo_tm, photo_uk, photo_vt):
     
     return photo
 
-def add_extinction(catalogue, getOptical=True, getIR=True, 
-                   url_ned='http://ned.ipac.caltech.edu/cgi-bin/calc'):
+
+def get_extinction(coords, filters=['PS1_g', 'PS1_r', 'PS1_i']):
+   
+    global extdata
+    filters = Table([filters], names=['filter'])
+    kk = join(extdata, filters, keys=['filter'])    
+    AEBV = np.array(kk['AEBV2'])
+    
+    t = IrsaDust.get_query_table(coords, section='ebv')    
+    ebv = np.array(t['ext SFD ref'])
+        
+    return ebv*AEBV
+
+
+def add_extinction(catalogue):
+
+    nsrcs = len(catalogue)
+    A = np.full((nsrcs,10), np.nan)
+    filters_opt = ['PS1_g', 'PS1_r', 'PS1_i', 'PS1_z', 'PS1_y']
+    filters_2mass = ['2MASS_J', '2MASS_H', '2MASS_Ks']
+    filters_ukidss = ['UKIRT_J', 'UKIRT_H', 'UKIRT_K']
+    filters_wise = ['WISE1', 'WISE2']
+
+    filters_2mass = filters_opt + filters_2mass + filters_wise
+    filters_ukidss = filters_opt + filters_ukidss + filters_wise
+
+    coords = SkyCoord(ra=catalogue['posRA'], dec=catalogue['posDec'])
+    nirsurvey = catalogue['NIR_SURVEY']
+    
+    with open('A.dat', 'w') as f: 
+        f.write ('#Ag Ar Ai Az Ay AJ AH AK AW1 AW2\n')
+    
+        for c,s in tqdm(zip(coords, nirsurvey), total=nsrcs, 
+                        desc='Adding extinction'):
+            if s == '2MASS':
+                filters = filters_2mass
+            else:
+                filters = filters_ukidss
+
+            Al = get_extinction(c, filters=filters)            
+            src_ext = ' '.join(['{:.3f}'.format(A) for A in Al])
+            f.write(src_ext + '\n')
+        
+    A = Table.read('A.dat', format='ascii.commented_header')
+    catalogue = hstack([catalogue, A], join_type='exact') 
+
+    return catalogue
+
+
+def add_extinction_old(catalogue, getOptical=True, getIR=True, 
+                       url_ned='http://ned.ipac.caltech.edu/cgi-bin/calc'):
 
     nsrcs = len(catalogue)
     A = np.full((nsrcs,10), np.nan)
     coords = SkyCoord(ra=catalogue['posRA'], dec=catalogue['posDec'])
     
     start=0
-    for i in trange(nsrcs) :
+    for i in trange(nsrcs):
         # Get optical extinction from NED
-        if getOptical :
+        if getOptical:
             payload = {'in_csys': 'Equatorial', 
                        'in_equinox': 'J2000.0', 
                        'obs_epoch': '2000.0', 
@@ -305,7 +370,7 @@ def add_extinction(catalogue, getOptical=True, getIR=True,
                         A[i,j] = cells[3].contents[0]
                         j += 1
 
-        if getIR :
+        if getIR:
             t = IrsaDust.get_extinction_table(coords[i])
     
             # NIR extinction
@@ -404,20 +469,20 @@ def add_data(catalogue, getPSphoto=False, getWSphoto=False, getUKphoto=False,
     catalogue = catalogue[catalogue['sample_photoz']]
     
     photo_ps_file = os.path.join(pstarrs_folder, 'photometry.fits')
-    if getPSphoto :
+    if getPSphoto:
         photo_ps = pstarrs(catalogue['PSobjID'])
-        
         root, ext = os.path.splitext(photo_ps_file)
         photo_ps.write('{}_all{}'.format(root,ext), overwrite=True)
         
+        #photo_ps = Table.read('{}_all{}'.format(root,ext), memmap=True)
         photo_ps = pstarrs_clean(photo_ps)
         photo_ps.write(photo_ps_file, overwrite=True)
 
-    else :
+    else:
         photo_ps = Table.read(photo_ps_file, memmap=True)
     
     photo_ws_file = os.path.join(wise_folder, 'photometry.fits')
-    if getWSphoto :
+    if getWSphoto:
         cols = 'cntr, cc_flags, ph_qual, '
         cols += 'w1mpro, w1sigmpro, w1snr, '
         cols += 'w2mpro, w2sigmpro, w2snr'
@@ -427,11 +492,11 @@ def add_data(catalogue, getPSphoto=False, getWSphoto=False, getUKphoto=False,
 
         photo_ws.write(photo_ws_file, overwrite=True)
 
-    else :
+    else:
         photo_ws = Table.read(photo_ws_file, memmap=True)
     
     photo_uk_file = os.path.join(ukidss_folder, 'photometry.fits')
-    if getUKphoto :
+    if getUKphoto:
         cols = 'sourceID, mergedClass, '
         cols += 'j_1AperMag3, j_1AperMag3Err, j_1ppErrBits, '        
         cols += 'hAperMag3, hAperMag3Err, hppErrBits, '
@@ -443,11 +508,11 @@ def add_data(catalogue, getPSphoto=False, getWSphoto=False, getUKphoto=False,
 
         photo_uk.write(photo_uk_file, overwrite=True)
 
-    else :
+    else:
         photo_uk = Table.read(photo_uk_file, memmap=True)
     
     photo_vt_file = os.path.join(vista_folder, 'photometry.fits')
-    if getVTphoto :
+    if getVTphoto:
         cols = 'sourceID, mergedClass, '
         cols += 'jAperMag3, jAperMag3Err, jppErrBits, '        
         cols += 'hAperMag3, hAperMag3Err, hppErrBits, '
@@ -459,11 +524,11 @@ def add_data(catalogue, getPSphoto=False, getWSphoto=False, getUKphoto=False,
 
         photo_vt.write(photo_vt_file, overwrite=True)
 
-    else :
+    else:
         photo_vt = Table.read(photo_vt_file, memmap=True)
     
     photo_tm_file = os.path.join(tmass_folder, 'photometry.fits')
-    if getTMphoto :
+    if getTMphoto:
         cols = 'pts_key, cc_flg, ph_qual, '
         cols += 'j_m, j_msigcom, j_snr, '
         cols += 'h_m, h_msigcom, h_snr, '
@@ -475,7 +540,7 @@ def add_data(catalogue, getPSphoto=False, getWSphoto=False, getUKphoto=False,
 
         photo_tm.write(photo_tm_file, overwrite=True)
 
-    else :
+    else:
         photo_tm = Table.read(photo_tm_file, memmap=True)
 
     catalogue_photo = merge(catalogue, photo_ps, photo_ws, photo_tm, photo_uk, photo_vt)

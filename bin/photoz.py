@@ -6,6 +6,7 @@ Created on Tue Mar 13 20:01:17 2018
 """
 
 import os
+import shutil
 import subprocess as sp
 from itertools import product
 
@@ -81,6 +82,7 @@ def make_training(cat_train, label, train_file, exttype):
 def make_testing(cat, columns, label, test_file, exttype, dered=True):
 
     colors_names = [c for c in columns[1:-1] if not c.startswith('e')]
+
     colors = np.full((len(cat), len(colors_names)), np.nan)
     colors_err = np.full((len(cat), len(colors_names)), np.nan)
     reddening = np.full((len(cat), len(colors_names)), np.nan)
@@ -125,7 +127,7 @@ def make_testing(cat, columns, label, test_file, exttype, dered=True):
 
 def make_tpzinput(file, trainfile, testfile, finalfile, columns, errors=True,
                   zmin=0.001, zmax=1.0, znbins=25,
-                  nrandom=6, ntress=8, natt=4,
+                  nrandom=6, ntrees=8, natt=4,
                   rms=0.06, sigma=3.0,
                   pmode='TPZ', pclass='Reg'):
     
@@ -154,9 +156,9 @@ def make_tpzinput(file, trainfile, testfile, finalfile, columns, errors=True,
         fp.write('PredictionClass  : {}\n'.format(pclass))
         fp.write('MinZ             : {:f}\n'.format(zmin))
         fp.write('MaxZ             : {:f}\n'.format(zmax))
-        fp.write('NzBins           : {:f}\n'.format(znbins))
+        fp.write('NzBins           : {:d}\n'.format(znbins))
         fp.write('NRandom          : {:d}\n'.format(nrandom))
-        fp.write('NTrees           : {:d}\n'.format(ntress))
+        fp.write('NTrees           : {:d}\n'.format(ntrees))
         fp.write('Natt             : {:d}\n'.format(natt))
         fp.write('OobError         : yes\n')
         fp.write('VarImportance    : yes\n')
@@ -180,9 +182,9 @@ def make_tpzinput(file, trainfile, testfile, finalfile, columns, errors=True,
         fp.write('NumberBases      : 20\n')
         fp.write('OriginalPdfFile  : yes\n')
 
-def runtpz(inputfile, srcids, resultfile, pdfs=True):
+def runtpz(inputfile, srcids, resultfile, pdfs=True, ncores=2):
     
-    sp.call('mpirun -n 2 runMLZ {}'.format(inputfile), shell=True)
+    sp.call('mpirun -n {} runMLZ {}'.format(ncores, inputfile), shell=True)
 
     folder = os.path.dirname(resultfile)
     file = os.path.basename(resultfile)
@@ -249,6 +251,11 @@ def calc(catalogue, photoz_folder):
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)
 
+    plots_folder = os.path.join(photoz_folder, '../plots')
+    plots_folder = os.path.normpath(plots_folder)
+    if not os.path.exists(plots_folder):
+        os.makedirs(plots_folder)
+        
     training_file = 'xtraining_PSTARRS1_SDSS_VISTA_UKIDSS_2MASS_WISE_coloursDered.fits'
     training_file = os.path.join(photoz_folder, training_file)    
     training_cat = Table.read(training_file, memmap=True)
@@ -258,7 +265,6 @@ def calc(catalogue, photoz_folder):
     
     i = 0
     for s, e in product(samples, ['ext', 'ptl']):
-        
         train = os.path.join(training_folder, '{}_{}.dat'.format(s, e))
         columns = make_training(training_cat, s, train, e)
         
@@ -266,11 +272,13 @@ def calc(catalogue, photoz_folder):
         testids = make_testing(catalogue, columns, s, test, e)
 
         results = os.path.join(results_folder, '{}_{}'.format(s, e))
-        if not os.path.exists(results):
-            os.makedirs(results)
+        if os.path.exists(results):
+            shutil.rmtree(results)
+        os.makedirs(results)            
         results = os.path.join(results, 'photoz')
 
-        colcol_filename = '../plots/colcol_{}_{}.png'.format(s, e)
+        colcol_filename = os.path.join(plots_folder, 
+                                       'colcol_{}_{}.png'.format(s, e))
         inTSCS = cc.calc(train, test, colcol_filename)
 
         if e == 'ext':
@@ -282,7 +290,7 @@ def calc(catalogue, photoz_folder):
 
         tpzinput = os.path.join(runs_folder, '{}_{}.input'.format(s, e))
         make_tpzinput(tpzinput, train, test, results, columns=columns, 
-                      zmax=zmax, znbins=znbins, nrandom=2, ntress=2)
+                      zmax=zmax, znbins=znbins, nrandom=10, ntrees=15)
     
         runtpz(tpzinput, testids, results)
      

@@ -15,14 +15,14 @@ import utils
 
 def add_table(data_table, name):
     
-    data_table.write('temp.vot', format='votable', overwrite=True)
+    data_table.write('temp.csv', format='ascii.csv', overwrite=True)
     
     url='http://mastweb.stsci.edu/ps1casjobs/'
     payload = {'tableTypeDDL': 0, 
                'NameBox': name,
-               'DataType': 1,
+               'DataType': 0,
                'importType': 1}
-    file = {'httpBox': open('temp.vot','rb')}
+    file = {'httpBox': open('temp.csv','rb')}
 
     user = getpass.getpass("casjobs user:")
     passwd = getpass.getpass("Password for " + user + ":")    
@@ -31,7 +31,7 @@ def add_table(data_table, name):
     r = s.get(url + 'login.aspx', params={'userid': user, 'password': passwd})
     r = s.post(url + 'TableImport.aspx', files=file, data=payload)
     
-    os.remove('temp.vot')
+    os.remove('temp.csv')
     
     return r.status_code
     

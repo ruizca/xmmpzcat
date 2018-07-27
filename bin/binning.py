@@ -145,7 +145,7 @@ def final(obsids_table, data_folder, nir_survey='2MASS') :
                                  ~obsids_table['SKY_OUTLIER'])
                                  
         bin_table = obsids_table[msk_bin]
-        bin_table, bin_stats = xrays(bin_table, 7, binid_first)
+        bin_table, bin_stats = xrays(bin_table, 45, binid_first)
         
         obsids_table_bins = vstack([obsids_table_bins, bin_table])
         stats = vstack([stats, bin_stats])

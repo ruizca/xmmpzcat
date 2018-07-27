@@ -14,6 +14,7 @@ plt.rc('text', usetex=True)
 plt.rc('font', family='serif')
 sns.set(color_codes=True)
 
+
 def plot_clusters(data, labels, colornames, filename=None):
 
     labelsize = 24
@@ -22,20 +23,20 @@ def plot_clusters(data, labels, colornames, filename=None):
     d_unc = data[labels < 0]
     d_star = data[labels == 0]
     d_glx = data[labels == 1]
-    
+
     plt.figure()
     plt.scatter(d_unc[colornames[0]], d_unc[colornames[1]], color='DimGray', marker='*', lw=0)
 
-    plt.scatter(d_star[colornames[0]], d_star[colornames[1]], color='YellowGreen', 
+    plt.scatter(d_star[colornames[0]], d_star[colornames[1]], color='YellowGreen',
                 edgecolors='none', marker='^', lw=0, rasterized=True)
-    plt.scatter(d_star[colornames[0]], d_star[colornames[1]], color='DarkOliveGreen', 
+    plt.scatter(d_star[colornames[0]], d_star[colornames[1]], color='DarkOliveGreen',
                 edgecolors='none', marker='^', lw=0, alpha=0.1, rasterized=True)
     
-    plt.scatter(d_glx[colornames[0]], d_glx[colornames[1]], color='CornflowerBlue', 
+    plt.scatter(d_glx[colornames[0]], d_glx[colornames[1]], color='CornflowerBlue',
                 edgecolors='none', marker='o', s=5, lw=0, rasterized=True)
-    plt.scatter(d_glx[colornames[0]], d_glx[colornames[1]], color='DarkSlateBlue', 
+    plt.scatter(d_glx[colornames[0]], d_glx[colornames[1]], color='DarkSlateBlue',
                 edgecolors='none', marker='o', s=5, lw=0, alpha=0.1, rasterized=True)
-    
+
     meanc = np.mean(data[colornames[0]])
     stdc = np.std(data[colornames[0]])
     plt.xlim(meanc - 4*stdc, meanc + 4*stdc)
@@ -43,21 +44,22 @@ def plot_clusters(data, labels, colornames, filename=None):
     meanc = np.mean(data[colornames[1]])
     stdc = np.std(data[colornames[1]])
     plt.ylim(meanc - 4*stdc, meanc + 4*stdc)
-    
+
     plt.xlabel('${}$'.format(colornames[0]), fontsize=labelsize)
     plt.ylabel('${}$'.format(colornames[1]), fontsize=labelsize)
-        
+
     plt.xticks(fontsize=ticksize)
     plt.yticks(fontsize=ticksize)
-    
-    plt.tight_layout()    
-    
+
+    plt.tight_layout()
+
     if filename is None:
-        #plt.show()
-        pass
+        plt.show()
+        #pass
     else:
         plt.savefig(filename)
         plt.close()
+
 
 def clusters(cat, mask, colors):
 
@@ -75,7 +77,7 @@ def clusters(cat, mask, colors):
     return stars
 
     
-def irsample(cat, sample='pstarrs', plotname=None):
+def irsample(cat, sample='pstarrs', plotname=None, proba_limit=0.5):
 
     if sample == "pstarrs":
         mask_ptl = (cat["objInfoFlag"] & 0x00800000) == 0
@@ -87,10 +89,9 @@ def irsample(cat, sample='pstarrs', plotname=None):
     mask_nir = np.logical_and(cat['good_J'], cat['good_K'])
     mask_mir = np.logical_and(cat['good_z'], cat['good_W1'])
 
-    col_gmz = Table.Column(cat['gMag'] - cat['zMag'], name='g-z')
-    col_zmw1 = Table.Column(cat['zMag'] - cat['W1Mag'], name='z-W1')
-    col_jmk = Table.Column(cat['JMag'] - cat['KMag'], name='J-K')    
-    cat.add_columns([col_gmz, col_zmw1, col_jmk])
+    cat['g-z'] = cat['gMag'] - cat['zMag']
+    cat['z-W1'] = cat['zMag'] - cat['W1Mag']
+    cat['J-K'] = cat['JMag'] - cat['KMag']
 
     # Find MIR stars
     mask = np.logical_and(mask_ptl, np.logical_and(mask_opt, mask_mir))
@@ -100,7 +101,7 @@ def irsample(cat, sample='pstarrs', plotname=None):
 
     plot_clusters(cat[mask], stars_mir['ct'], 
                   colornames=colors, filename=plotname) 
-    
+
     # Find NIR stars
     mask = np.logical_and(mask_ptl, np.logical_and(mask_opt, mask_nir))
     colors = ['g-z', 'J-K']
@@ -113,26 +114,28 @@ def irsample(cat, sample='pstarrs', plotname=None):
 
     stars = join(stars_mir, stars_nir, keys='XMMSRCID', 
                  join_type='outer', table_names=['mir', 'nir'])
-    
-    msk_stars = np.logical_or(np.logical_and(stars['ct_mir'] == 1,
-                                             stars['prob_ct_mir'] > 0.5),
+
+    # The star cluster in the nir sample is labeled 1, instead of 0
+    msk_stars = np.logical_or(np.logical_and(stars['ct_mir'] == 0,
+                                             stars['prob_ct_mir'] > proba_limit),
                               np.logical_and(stars['ct_nir'] == 1,
-                                             stars['prob_ct_nir'] > 0.5))
+                                             stars['prob_ct_nir'] > proba_limit))
     
-    msk_nostars = np.logical_or(np.logical_and(stars['ct_mir'] == 0,
-                                               stars['prob_ct_mir'] > 0.5),
+    msk_nostars = np.logical_or(np.logical_and(stars['ct_mir'] == 1,
+                                               stars['prob_ct_mir'] > proba_limit),
                                 np.logical_and(stars['ct_nir'] == 0,
-                                               stars['prob_ct_nir'] > 0.5))
-    
-    stars_col = Table.Column(msk_stars, name='STARS_MIRNIR')
-    nostars_col = Table.Column(msk_nostars, name='NOSTARS_MIRNIR')
-    stars_table = Table([stars['XMMSRCID'], stars_col, nostars_col])
+                                               stars['prob_ct_nir'] > proba_limit))
+    stars_table = Table()
+    stars_table['XMMSRCID'] = stars['XMMSRCID']
+    stars_table['STARS_MIRNIR'] = msk_stars
+    stars_table['NOSTARS_MIRNIR'] = msk_nostars
 
     idstar_sample = join(cat, stars_table, keys='XMMSRCID')
     mask = np.logical_or(idstar_sample['STARS_MIRNIR'], 
                          idstar_sample['NOSTARS_MIRNIR'])
     
     return idstar_sample[mask]
+
 
 def make_training(cat, colors_names, train_file):
     
@@ -151,13 +154,14 @@ def make_training(cat, colors_names, train_file):
     
     sample = hstack([Table([cat['PSobjID']]), Table(colors), 
                      Table(colors_err), Table([star_class])])
-    
+
     colnames = ['id'] + colors_names + err_names + ['star']
     sample = Table(sample, names=colnames)
-    
+
     sample.write(train_file, format='ascii.commented_header', overwrite=True)
     
     return colnames
+
 
 def make_testing(cat, columns, test_file):
 
@@ -178,7 +182,8 @@ def make_testing(cat, columns, test_file):
     sample[msk].write(test_file, format='ascii.commented_header', overwrite=True)
     
     return Table([sample[msk][columns[0]]])
-    
+
+
 def find(cat):
 
     colors = ['gmr', 'gmi', 'gmz', 'gmy', 'rmi', 
@@ -192,25 +197,32 @@ def find(cat):
     results = os.path.join(results_folder, 'stars')
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)
-        
+
     training = irsample(cat)
     columns = make_training(training, colors, train_file)    
     testids = make_testing(cat, columns, test_file)
     make_tpzinput(run_file, train_file, test_file, results, columns=columns, 
-                  zmin=0, zmax=2, znbins=2, pmode='TPZ_C', pclass='Class')
+                  zmin=0, zmax=1, znbins=2, nrandom=10, ntrees=15, 
+                  pmode='TPZ_C', pclass='Class')
     runtpz(run_file, testids, results, pdfs=False)
-    
+
     stars_tpz = Table.read(results + '.fits', memmap=True)
     msk = stars_tpz['zmode0'] == 1
-    stars_tpz = Table([stars_tpz[msk]['id'], msk[msk]], 
-                      names=['PSobjID', 'STARS_TPZ'])
-    
+    stars_tpz.keep_columns(['id', 'zmode0'])
+    stars_tpz.rename_column('id', 'PSobjID')
+    stars_tpz.rename_column('zmode0', 'STARS_TPZ')
+    stars_tpz = stars_tpz[msk]
+       
     stars_nirmir = training[training['STARS_MIRNIR']]
     stars_nirmir.keep_columns(['PSobjID', 'STARS_MIRNIR'])
-
-    print(stars_tpz)
-    print(stars_nirmir)
+    stars_nirmir.replace_column('STARS_MIRNIR', np.ones(len(stars_nirmir)))
     
-    stars = join(stars_nirmir, stars_tpz, keys='PSobjID', join_type='outer')
-    print(stars)
+    newcat = join(cat, stars_nirmir, keys='PSobjID', join_type='left')
+    newcat = join(newcat, stars_tpz, keys='PSobjID', join_type='left')
     
+    stars_any = np.logical_or(newcat['STARS_MIRNIR'] == True, 
+                              newcat['STARS_TPZ'] == True)
+    stars_any = Table.Column(stars_any, name='STAR')    
+    newcat.add_column(stars_any)
+        
+    return newcat

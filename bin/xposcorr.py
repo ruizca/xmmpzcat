@@ -8,14 +8,12 @@ import os
 import glob
 import shutil
 import subprocess as sp
+
 import numpy as np
-
 from tqdm import tqdm
-
 from astropy.table import Table, join, vstack
 from astropy.coordinates import SkyCoord
 from astropy import units as u
-
 from astroquery.vizier import Vizier
 
 import utils
@@ -136,7 +134,8 @@ def run(detections, unqsrcs, obsids, data_folder) :
         os.makedirs(poscorr_folder)
     
     det_table = Table.read(detections, memmap=True)
-    det_table.keep_columns(['SRCID', 'SRC_NUM', 'OBS_ID', 'RA', 'DEC', 'POSERR'])
+    det_table.keep_columns(['SRCID', 'SRC_NUM', 'OBS_ID', 
+                            'RA', 'DEC', 'POSERR'])
 
     field_coords = SkyCoord(ra=obsids['RA']*u.deg, dec=obsids['DEC']*u.deg)
     obsids.keep_columns(['OBS_ID'])
@@ -147,6 +146,8 @@ def run(detections, unqsrcs, obsids, data_folder) :
     tables_array = [None]*len(obsids)
     
     for i, obsid in enumerate(tqdm(obsids, desc='Correcting positions')) :
+        if i < 228 :
+            continue
         #Get PPS sources list
         xmm_srclist = getPPS(obsid['OBS_ID'])
         

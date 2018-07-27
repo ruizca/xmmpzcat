@@ -6,16 +6,13 @@ Created on Thu Mar  8 17:49:20 2018
 """
 
 import os
+import logging
+
 import numpy as np
-
-import matplotlib
-matplotlib.use("qt5agg")
-
-from astropy.table import Table, vstack, unique
+from astropy.table import Table, vstack, unique, join
 from astropy.coordinates import SkyCoord, ICRS
 from astropy import units as u
 from astropy_healpix import HEALPix
-
 from pymoc import MOC
 from pymoc.io.fits import read_moc_fits
 
@@ -26,6 +23,17 @@ import binning
 import xposcorr
 import crossmatching
 
+
+def final_cat(probacat, photozcat):
+    photozcat.remove_columns(['ztrue','zmean1', 'zConf1', 'err1'])
+    photozcat.rename_column('id', 'PSobjID')
+    photozcat.rename_column('zmode0', 'PHOT_Z')
+    photozcat.rename_column('zConf0', 'PHOT_ZCONF')
+    photozcat.rename_column('err0', 'PHOT_ZERR')
+    
+    finalcat = join(probacat, photozcat, join_type='right', keys=['PSobjID'])
+
+    return finalcat
 
 def clean_cat(catalogue, probalimit=0.68):
     
@@ -60,7 +68,7 @@ def clean_cat(catalogue, probalimit=0.68):
     samplePZ = np.logical_or(sampleXPWN, sampleXPW)
     samplePZ = np.logical_or(samplePZ, sampleXPN)
     samplePZ = np.logical_or(samplePZ, sampleXP)
-    
+
     catalogue.add_column(Table.Column(exgal_flag), name='exgal')
     catalogue.add_column(Table.Column(sampleXP), name='sampleXP')
     catalogue.add_column(Table.Column(sampleXPW), name='sampleXPW')
@@ -134,51 +142,78 @@ def merge_cat(tmass, ukidss, vista):
 
     msk = np.logical_or(xmatchcat_final['NIR_SURVEY'] == 'UKIDSS',
                         xmatchcat_final['NIR_SURVEY'] == '2MASS')
-    print(len(np.where(msk)))
     msk = np.logical_and(xmatchcat_final['NIRobjID'].mask, msk)
-    print(len(np.where(msk)))
 
     return xmatchcat_final
 
-def make_cat(nir_survey, radius=15*u.arcmin, poscorr=False, make_mocs=False, 
-             getXdata=False, getPSdata=False, getWSdata=False, getNIRdata=False,
-             define_bins=False, make_bins=False, make_xmatch=False):
+
+def clean_obsids(obsids, radius, opt_survey='pstarrs'):
+    # Select clean observations
+    xmmobs_clean = xmmobs[xmmobs.columns['OBS_CLASS'] < 4]
+    
+    if opt_survey == 'pstarrs':
+        # Select observations in Pan-STARRS footprint (dec>-30. deg)   
+        msk_pstarrs = xmmobs_clean.columns['DEC'] > -30 + radius.to(u.deg).value    
+        xmmobs_clean_opt = xmmobs_clean[msk_pstarrs]
+
+    elif opt_survey == 'sdss':
         
-    cat_url = 'http://xmmssc.irap.omp.eu/Catalogue/3XMM-DR7'
-    obs_filename = '3xmmdr7_obslistV2.fits'
-    det_filename = '3XMM_DR7cat_v1.0_test.fits'
-    src_filename = '3XMM_DR7cat_slim_v1.0.fits'
+        
+    else:
+        raise ValueError('Unknown optical survey: {}'.format(opt_survey))
+
+    return xmmobs_clean_opt
+
+
+def make_cat(opt_survey, nir_survey, radius=15*u.arcmin, poscorr=False, 
+             make_mocs=False, getXdata=False, getPSdata=False, getWSdata=False, 
+             getNIRdata=False, define_bins=False, make_bins=False, 
+             make_xmatch=False):
+        
+    cat_url = 'http://xmmssc.irap.omp.eu/Catalogue/3XMM-DR8'
+    obs_filename = '3xmmdr8_obslist.fits'
+    det_filename = '3XMM_DR8cat_v1.0.fits'
+    src_filename = '3XMM_DR8cat_slim_v1.0.fits'
+
+    # Increase in radius to avoid border effects in the crossmatch:
+    delta_radius = 0.3*u.arcmin #(18 arcsec, like ARCHES)
+
+    if opt_survey == 'pstarrs':
+        opt_label = 'pstarrs'
+    elif opt_survey == 'sdss':
+        opt_label = 'sdss'
+    else:
+        raise ValueError('Unknown optical survey: {}'.format(opt_survey))
     
     ### Define and create (if needed) data folders
     root_folder = os.path.realpath(__file__)
     root_folder = os.path.dirname(root_folder)
 
-    data_folder = os.path.join(root_folder, '../data')
+    data_folder = os.path.join(root_folder, '../{}_data'.format(opt_survey))
     data_folder = os.path.normpath(data_folder)
-    if not os.path.exists(data_folder) :
+    if not os.path.exists(data_folder):
         os.makedirs(data_folder)
 
-    xmm_folder  = os.path.join(data_folder, '3xmmdr7')
-    if not os.path.exists(xmm_folder) :
+    xmm_folder  = os.path.join(data_folder, '3xmmdr8')
+    if not os.path.exists(xmm_folder):
         os.makedirs(xmm_folder)
     
-    pstarrs_folder = os.path.join(data_folder, 'pstarrs1')
-    if not os.path.exists(pstarrs_folder) :
-        os.makedirs(pstarrs_folder)
+    opt_folder = os.path.join(data_folder, opt_survey)
+    if not os.path.exists(opt_folder):
+        os.makedirs(opt_folder)
 
     wise_folder = os.path.join(data_folder, 'allwise')
-    if not os.path.exists(wise_folder) :
+    if not os.path.exists(wise_folder):
         os.makedirs(wise_folder)
 
     nir_folder = os.path.join(data_folder, nir_survey.lower())
-    if not os.path.exists(nir_folder) :
+    if not os.path.exists(nir_folder):
         os.makedirs(nir_folder)
 
     if nir_survey is '2MASS' :
         nir_label = 'NTM'
         url_moc = None
         errtype_nir = 'ellipse'
-        
 
     elif nir_survey is 'UKIDSS' :
         nir_label = 'NUK'
@@ -191,50 +226,52 @@ def make_cat(nir_survey, radius=15*u.arcmin, poscorr=False, make_mocs=False,
         errtype_nir = 'circle'
         
     else :
-        raise ValueError('Invalid near-infrared survey!')
+        raise ValueError('Unknown near-infrared survey!')
         
     nir_moc = utils.get_moc(url_moc, nir_survey, nir_folder)
 
     xmatch_folder = os.path.join(root_folder, '../xmatch')
     xmatch_folder = os.path.normpath(xmatch_folder)
-    if not os.path.exists(xmatch_folder) :
+    if not os.path.exists(xmatch_folder):
         os.makedirs(xmatch_folder)
 
     folders_dict = {'xmatch': xmatch_folder, 'xmm': xmm_folder,
-                    'pstarrs': pstarrs_folder, 'wise': wise_folder,
+                    'opt': opt_folder, 'wise': wise_folder,
                     'nir': nir_folder}
 
     ### Get the list of XMM-Newton observations in the XMM catalogue
     xmmobsids_file_org = os.path.join(xmm_folder, obs_filename)
 
-    if not os.path.isfile(xmmobsids_file_org) :
+    if not os.path.isfile(xmmobsids_file_org):
         utils.downloadFile(os.path.join(cat_url, obs_filename), 
                            folders_dict['xmm'])
         
     ### Select valid obsids (clean observations and in Pan-STARRS footprint)
     # Open table
-    try :
+    try:
         xmmobs = Table.read(xmmobsids_file_org)
-        
-    except :
-        print("Unable to open XMM OBSIDs table!!!")
-        print(xmmobsids_file_org)
-        return
 
+    except:
+        message = 'Unable to open XMM OBSIDs table!!!\nFile: {}'
+        logging.error(message.format(xmmobsids_file_org))
+        return
 
     # Select clean observations
     msk_obsclass = xmmobs.columns['OBS_CLASS'] < 4
     xmmobs_clean = xmmobs[msk_obsclass]
     
+    
+    xmmobs_clean_opt = clean_obsids(xmmobs, opt_survey)
     # Select observations in Pan-STARRS footprint (dec>-30. deg)   
     msk_pstarrs = xmmobs_clean.columns['DEC'] > -30 + radius.to(u.deg).value    
-    xmmobs_clean_pstarrs = xmmobs_clean[msk_pstarrs][:300]
+    xmmobs_clean_pstarrs = xmmobs_clean[msk_pstarrs]
    
     
     ### Define non-overlapping mocs for the obsids    
-    if make_mocs :    
-        xmmmocs.make_mocs(xmmobs_clean_pstarrs, folders_dict['xmm'], 
-                          moc_order=16, radius=radius, remove_stars=True)
+    if make_mocs:
+        xmmmocs.make_mocs(xmmobs_clean_pstarrs, folders_dict['xmm'],
+                          moc_order=15, radius=radius + delta_radius,
+                          remove_stars=True, remove_large_galaxies=True)
 
 
     ### Get data for the cross-match
@@ -242,7 +279,7 @@ def make_cat(nir_survey, radius=15*u.arcmin, poscorr=False, make_mocs=False,
     # Check if the XMM sources catalogue exists and download otherwise
     xmmcat_file = os.path.join(folders_dict['xmm'], src_filename)
 
-    if not os.path.isfile(xmmcat_file) :
+    if not os.path.isfile(xmmcat_file):
         src_filename_gz = '{}.gz'.format(src_filename)
         utils.downloadFile(os.path.join(cat_url, src_filename_gz), 
                            folders_dict['xmm'])
@@ -250,11 +287,11 @@ def make_cat(nir_survey, radius=15*u.arcmin, poscorr=False, make_mocs=False,
                          xmmcat_file)
 
     # Correct astrometry of XMM sources
-    if poscorr :
+    if poscorr:
         # Check if the detections catalogue exists and download otherwise
         xmmdet_file = os.path.join(folders_dict['xmm'], det_filename)
         
-        if not os.path.isfile(xmmdet_file) :
+        if not os.path.isfile(xmmdet_file):
             det_filename_gz = '{}.gz'.format(det_filename)            
             utils.downloadFile(os.path.join(cat_url, det_filename_gz), 
                                folders_dict['xmm'])
@@ -263,18 +300,16 @@ def make_cat(nir_survey, radius=15*u.arcmin, poscorr=False, make_mocs=False,
 
         xposcorr.run(xmmdet_file, xmmcat_file, xmmobs_clean_pstarrs, 
                      folders_dict['xmm'])
-        
-        return
     
     # Make files with X-ray sources per non-overlaping field
     file_name, file_ext = os.path.splitext(xmmobsids_file_org)
     xmmobsids_file = '{}_{}_clean_pstarrs{}'.format(file_name, nir_survey.lower(),
                                                     file_ext)
 
-    if getXdata :
+    if getXdata:
         xmmobs_xdata = getdata.xmm(xmmobs_clean_pstarrs, folders_dict['xmm'], 
-                                   xmmcat_file, nir_moc=nir_moc, moc_order=16, 
-                                   use_poscorr=False)
+                                   xmmcat_file, nir_moc=nir_moc, moc_order=15, 
+                                   radius=radius, use_poscorr=False)
 
         # Save selected obsids 
         # (with Texp and sky area, remove fields with no sources)
@@ -287,87 +322,92 @@ def make_cat(nir_survey, radius=15*u.arcmin, poscorr=False, make_mocs=False,
     file_name, file_ext = os.path.splitext(xmmobsids_file)
     xmmobsids_file = '{}_nPSsrc{}'.format(file_name, file_ext)
     
-    if getPSdata :
+    if getPSdata:
         xmmobs_psdata = getdata.pstarrs(xmmobs_xdata, folders_dict['pstarrs'], 
-                                        xmm_folder, nir_moc=nir_moc, moc_order=16, 
-                                        radius=radius, overwrite=False)
+                                        xmm_folder, nir_moc=nir_moc, moc_order=15, 
+                                        radius=radius + delta_radius,
+                                        overwrite=False)
                                         
         xmmobs_psdata.write(xmmobsids_file, overwrite=True)
 
-    else :
+    else:
         xmmobs_psdata = Table.read(xmmobsids_file)
     
     ## All-WISE
     file_name, file_ext = os.path.splitext(xmmobsids_file)
     xmmobsids_file = '{}_nWSsrc{}'.format(file_name, file_ext)
     
-    if getWSdata :
+    if getWSdata:
         xmmobs_wsdata = getdata.wise(xmmobs_psdata, folders_dict['wise'], 
-                                     xmm_folder, nir_moc=nir_moc, moc_order=16, 
-                                     radius=radius, overwrite=False)
+                                     xmm_folder, nir_moc=nir_moc, moc_order=15, 
+                                     radius=radius + delta_radius,
+                                     overwrite=False)
                                         
         xmmobs_wsdata.write(xmmobsids_file, overwrite=True)
 
-    else :
+    else:
         xmmobs_wsdata = Table.read(xmmobsids_file)
        
     ## NIR data
     file_name, file_ext = os.path.splitext(xmmobsids_file)
     xmmobsids_file = '{}_n{}src{}'.format(file_name, nir_label, file_ext)
        
-    if getNIRdata :
-        if nir_survey is '2MASS' :
+    if getNIRdata:
+        if nir_survey is '2MASS':
             xmmobs_nirdata = getdata.tmass(xmmobs_wsdata, folders_dict['nir'], 
-                                           xmm_folder, moc_order=16, 
-                                           radius=radius, overwrite=False)
-        elif nir_survey is 'UKIDSS' :
+                                           xmm_folder, moc_order=15, 
+                                           radius=radius + delta_radius, 
+                                           overwrite=False)
+        elif nir_survey is 'UKIDSS':
             xmmobs_nirdata = getdata.ukidss(xmmobs_wsdata, folders_dict['nir'], 
-                                            xmm_folder, moc_order=16, 
-                                            radius=radius, overwrite=True)
-        elif nir_survey is 'VISTA' :
+                                            xmm_folder, moc_order=15, 
+                                            radius=radius + delta_radius, 
+                                            overwrite=True)
+        elif nir_survey is 'VISTA':
             xmmobs_nirdata = getdata.vista(xmmobs_wsdata, folders_dict['nir'], 
-                                           xmm_folder, moc_order=16, 
-                                           radius=radius, overwrite=True)
+                                           xmm_folder, moc_order=15, 
+                                           radius=radius + delta_radius, 
+                                           overwrite=True)
 
         xmmobs_nirdata.write(xmmobsids_file, overwrite=True)
 
-    else :
+    else:
         xmmobs_nirdata = Table.read(xmmobsids_file)
     
 
     ### Calculate bins according to XMM exposure time and galactic latitude
     file_name, file_ext = os.path.splitext(xmmobsids_file_org)
-    xmmobsids_file = '{}_{}_bins{}'.format(file_name, nir_survey.lower(), 
+    xmmobsids_file = '{}_{}_bins{}'.format(file_name, nir_survey.lower(),
                                            file_ext)
-
-    if define_bins :
+    if define_bins:
         ## Galactic latitude binning
         xmmobs_optbin = binning.optical(xmmobs_nirdata, data_folder, nir_survey)
-        
+
         ## XMM exposure binning
         xmmobs_bins = binning.final(xmmobs_optbin, data_folder, nir_survey)
         xmmobs_bins.write(xmmobsids_file, overwrite=True)
-    
-    else :
+
+    else:
         xmmobs_bins = Table.read(xmmobsids_file)
 
 
     ### Make bins
-    if make_bins :
-        binning.makebins(xmmobs_bins, folders_dict['xmm'], 'XMM', 
+    if make_bins:
+        binning.makebins(xmmobs_bins, folders_dict['xmm'], 'XMM',
                          nir_survey, errtype='circle')
-        binning.makebins(xmmobs_bins, folders_dict['pstarrs'], 'Pan-STARRS', 
+        binning.makebins(xmmobs_bins, folders_dict['pstarrs'], 'Pan-STARRS',
                          nir_survey, errtype='rcd_dec_ellipse')
-        binning.makebins(xmmobs_bins, folders_dict['wise'], 'WISE', 
+        binning.makebins(xmmobs_bins, folders_dict['wise'], 'WISE',
                          nir_survey, errtype='ellipse')
-        binning.makebins(xmmobs_bins, folders_dict['nir'], nir_survey, 
+        binning.makebins(xmmobs_bins, folders_dict['nir'], nir_survey,
                          errtype=errtype_nir)
-    
+
+
     ### Crossmatching of catalogues
     xmatchcat_filename = '{}_xmatchcat.fits'.format(nir_survey.lower())
-    xmatchcat_filename = os.path.join(folders_dict['xmatch'], xmatchcat_filename)
-    
-    if make_xmatch :
+    xmatchcat_filename = os.path.join(folders_dict['xmatch'], 
+                                      xmatchcat_filename)
+    if make_xmatch:
         stats_filename = '{}_bins.fits'.format(nir_survey.lower())
         bin_stats = Table.read(os.path.join(data_folder, stats_filename))
         
@@ -376,7 +416,7 @@ def make_cat(nir_survey, radius=15*u.arcmin, poscorr=False, make_mocs=False,
         xmatch_cat = crossmatching.merge_cats(folders_dict, nir_survey, nir_label)
         xmatch_cat.write(xmatchcat_filename, overwrite=True)
 
-    else :
+    else:
         xmatch_cat = Table.read(xmatchcat_filename, memmap=True)
 
     return xmatch_cat
