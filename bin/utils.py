@@ -105,19 +105,19 @@ def get_moc(url, survey, folder):
     return filename
 
 
-def sources_inmoc(sources, hp, moc, moc_order=15, ra='RA', dec='Dec'):
+def sources_inmoc(sources, hp, moc, moc_order=15, 
+                  ra='RA', dec='Dec', units=None):
     """
     Find those sources in the astropy table sources included in moc.
     """
-    cells = hp.skycoord_to_healpix(SkyCoord(ra=sources[ra], 
-                                            dec=sources[dec]))
+    if units is None:
+        coords = SkyCoord(ra=sources[ra], dec=sources[dec])
+    else:
+        coords = SkyCoord(ra=sources[ra], dec=sources[dec], unit=units)
 
-    cells_msk = np.array([moc.contains(moc_order, cell) for cell in cells])
-#    cells_msk = np.full(len(cells), np.nan)    
-#    for j, cell in enumerate(cells):
-#        cells_msk[j] = moc.contains(moc_order, cell)
+    cells_msk = np.array([moc.contains(moc_order, cell) 
+                          for cell in hp.skycoord_to_healpix(coords)])
 
-    #return sources[np.where(cells_msk)]
     return sources[cells_msk]
 
 
