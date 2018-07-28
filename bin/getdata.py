@@ -19,7 +19,8 @@ from pymoc.io.fits import read_moc_fits
 
 from utils import sources_inmoc
 
-def xmm(obsids_table, data_folder, src_filename, nir_moc=None,
+
+def xmm(obsids_table, data_folder, src_filename, nir_moc=None, opt_moc=None,
         moc_order=16, radius=15*u.arcmin, use_poscorr=False):
     """
     Get XMM sources
@@ -54,18 +55,22 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None,
     if not os.path.exists(groups_folder):
         os.makedirs(groups_folder)
 
+    if opt_moc is not None:
+        moc_optsurvey = MOC()
+        read_moc_fits(moc_optsurvey, opt_moc)
+
     src_table_all = Table.read(src_filename)
     msk_badsrc = src_table_all['SC_SUM_FLAG'] < 2
 
     if use_poscorr:
-        raCol = 'SC_RA_CORR'
-        decCol = 'SC_DEC_CORR'
+        rakey = 'SC_RA_CORR'
+        deckey = 'SC_DEC_CORR'
     else:
-        raCol = 'SC_RA'
-        decCol = 'SC_DEC'
+        rakey = 'SC_RA'
+        deckey = 'SC_DEC'
 
     src_table = src_table_all[msk_badsrc]
-    src_catalog = SkyCoord(ra=src_table[raCol], dec=src_table[decCol])
+    src_catalog = SkyCoord(ra=src_table[rakey], dec=src_table[deckey])
 
     area_field = np.full((len(obsids_table),), np.nan)
     nsources_field = np.full((len(obsids_table),), np.nan)
@@ -79,6 +84,9 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None,
 
         moc_field = MOC()
         read_moc_fits(moc_field, moc_file)
+
+        if opt_moc is not None:
+            moc_field = moc_optsurvey.intersection(moc_field)
 
         if nir_moc is not None:
             moc_field = moc_nirsurvey.intersection(moc_field)
@@ -97,7 +105,7 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None,
             ## Select sources in the non-overlaping area
             inmoc_table = sources_inmoc(src_table_new, hp, moc_field,
                                         moc_order=moc_order,
-                                        ra=raCol, dec=decCol)
+                                        ra=rakey, dec=deckey)
 
             nsources_field[i] = len(inmoc_table)
 
@@ -113,7 +121,7 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None,
 
     if 'EP_TEXP' in obsids_table.colnames:
         obsids_table.add_columns([colarea, colsrc])
-        
+
     else:
         texp_ep = (3.0*obsids_table['PN_TEXP'] +
                    obsids_table['M1_TEXP'] + obsids_table['M2_TEXP'])/5
@@ -123,15 +131,15 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None,
     return obsids_table[colsrc > 0]
 
 
-def sdss(obsids_table, data_folder, moc_folder, nir_moc=None,
-            radius=15*u.arcmin, moc_order=16, overwrite=True):
+def sdss(obsids_table, data_folder, moc_folder, nir_moc=None, data_release=14,
+         radius=15*u.arcmin, moc_order=15, overwrite=True):
     """
-    Get SDSS data using astroquery and Vizier.
+    Get SDSS data using astroquery.
     For each observation in obsids_table, saves a fits file with
     name 'OBS_ID.fits' in 'data_folder/groups'.
 
     The function sends a query and selects all sources within 'radius'
-    arcmin of the RA,DEC of the observation, then it filters the result
+    of the RA,DEC of the observation, then it filters the result
     selecting the sources in the corresponding MOC stored in 'moc_folder/mocs'
     (moc_order must be consistent with the order used to calculate the MOC).
 
@@ -139,12 +147,13 @@ def sdss(obsids_table, data_folder, moc_folder, nir_moc=None,
     an existing file and uses it to calculate the number of SDSS sources
     in the field. If it doesn't exist, creates the file.
 
-    The function returns obsids_table with an additional column 'NSRC_SDSS' 
+    The function returns obsids_table with an additional column 'NSRC_SDSS'
     with the number of sources in the field.
     """
     # Groups folder
     if nir_moc is None:
         groups_folder = os.path.join(data_folder, 'groups')
+
     else:
         root, _ = os.path.splitext(os.path.basename(nir_moc))
         survey = root.split('_')[-1]
@@ -160,10 +169,7 @@ def sdss(obsids_table, data_folder, moc_folder, nir_moc=None,
 
     nsources_field = np.full((len(obsids_table),), np.nan)
     hp = HEALPix(nside=2**moc_order, order='nested', frame=ICRS())
-
-    v = Vizier(columns=['objID', 'RAJ2000', 'DEJ2000',
-                        'e_RAJ2000', 'e_DEJ2000', 'Nd', 'Qual'],
-               column_filters={"Nd":">1"}, row_limit=np.inf, timeout=6000)
+    photoobj_fields = ['objid', 'mode', 'ra', 'dec', 'raErr', 'decErr']
 
     for i, row in enumerate(tqdm(obsids_table,
                                  desc="Making SDSS groups")):
@@ -176,56 +182,27 @@ def sdss(obsids_table, data_folder, moc_folder, nir_moc=None,
             ## Select all sources in the field
             field_coords = SkyCoord(ra=row['RA']*u.deg, dec=row['DEC']*u.deg)
 
-            vrsp = v.query_region_async(field_coords, radius=radius,
-                                        catalog='II/349', return_type='asu-tsv')
-
-            # Fix bug in the vizier response
-            # (returns the objID as a short int and fails to load
-            # properly as an astropy table)
-            fp = open('/tmp/tmp.tab', 'wb')
-            fp.write(vrsp.content)
-            fp.close()
-
-            src_table = Table.read('/tmp/tmp.tab', format='ascii.tab')
-            src_table = src_table[2:]
-
-            objid = np.array(src_table['objID']).astype(np.int64)
-            ra = np.array(src_table['RAJ2000']).astype(np.float) * u.deg
-            dec = np.array(src_table['DEJ2000']).astype(np.float) * u.deg
-
-            err_ra = np.array(src_table['e_RAJ2000'])
-            err_ra[err_ra == '            '] = '-1'
-            err_ra = err_ra.astype(np.float) * u.arcsec
-            err_ra[err_ra == -1] = np.nan
-
-            err_dec = np.array(src_table['e_DEJ2000'])
-            err_dec[err_dec == '            '] = '-1'
-            err_dec = err_dec.astype(np.float) * u.arcsec
-            err_dec[err_dec == -1] = np.nan
-
-            flag = np.array(src_table['Qual']).astype(np.int32)
-
-            src_table = Table([objid, ra, dec, err_ra, err_dec, flag],
-                              names=['objID', 'RAJ2000', 'DEJ2000',
-                                     'e_RAJ2000', 'e_DEJ2000', 'Qual'])
+            src_table = SDSS.query_region(field_coords, radius=radius,
+                                          photoobj_fields=photoobj_fields,
+                                          data_release=data_release)
             # Filter table
-            msk_good = (src_table['Qual'] & 16) != 0
-            src_table_new = src_table[msk_good]
+            # In ARCHES, the only filter is selecting primary objects,
+            # no filtering in the quality of photometry (clean).
+            src_table = src_table[src_table['mode'] == 1]
 
             ## Select sources in the non-overlaping area
             moc_field = MOC()
             read_moc_fits(moc_field, os.path.join(moc_folder,
                                             '{}.moc'.format(row['OBS_ID'])))
-
             if nir_moc is not None:
                 moc_field = moc_nirsurvey.intersection(moc_field)
 
-            inmoc_table = sources_inmoc(src_table_new, hp, moc_field,
+            inmoc_table = sources_inmoc(src_table, hp, moc_field,
                                         moc_order=moc_order,
-                                        ra='RAJ2000', dec='DEJ2000')
+                                        ra='ra', dec='dec', units=u.deg)
             ## Save sources
-            inmoc_table.remove_columns(['Qual'])
-            inmoc_table.meta['description'] = 'Pan-STARRS'
+            inmoc_table.remove_columns(['mode'])
+            inmoc_table.meta['description'] = 'SDSS'
             inmoc_table.write(field_table_file, overwrite=True)
 
         else:
@@ -233,7 +210,7 @@ def sdss(obsids_table, data_folder, moc_folder, nir_moc=None,
 
         nsources_field[i] = len(inmoc_table)
 
-    colsrc = Table.Column(nsources_field, name='NSRC_PS')
+    colsrc = Table.Column(nsources_field, name='NSRC_SDSS')
     obsids_table.add_column(colsrc)
 
     return obsids_table
@@ -299,9 +276,8 @@ def pstarrs(obsids_table, data_folder, moc_folder, nir_moc=None,
             # Fix bug in the vizier response
             # (returns the objID as a short int and fails to load
             # properly as an astropy table)
-            fp = open('/tmp/tmp.tab', 'wb')
-            fp.write(vrsp.content)
-            fp.close()
+            with open('/tmp/tmp.tab', 'wb') as tmpfile:
+                tmpfile.write(vrsp.content)
 
             src_table = Table.read('/tmp/tmp.tab', format='ascii.tab')
             src_table = src_table[2:]
@@ -356,7 +332,7 @@ def pstarrs(obsids_table, data_folder, moc_folder, nir_moc=None,
     return obsids_table
 
 
-def wise(obsids_table, data_folder, moc_folder, nir_moc=None,
+def wise(obsids_table, data_folder, moc_folder, nir_moc=None, opt_moc=None,
          radius=15*u.arcmin, moc_order=16, overwrite=True):
     """
     Get All-WISE data using astroquery and Vizier
@@ -372,10 +348,9 @@ def wise(obsids_table, data_folder, moc_folder, nir_moc=None,
     an existing file and uses it to calculate the number of WISE sources
     in the field. If it doesn't exist, creates the file.
 
-    The function returns obsids_table with an additional column 'NSRC_WS' with
-    the number of sources in the field.
+    The function returns obsids_table with an additional column 'NSRC_WS'
+    with the number of sources in the field.
     """
-
     # Groups folder
     if nir_moc is None:
         groups_folder = os.path.join(data_folder, 'groups')
@@ -391,6 +366,10 @@ def wise(obsids_table, data_folder, moc_folder, nir_moc=None,
         os.makedirs(groups_folder)
 
     moc_folder = os.path.join(moc_folder, 'mocs')
+
+    if opt_moc is not None:
+        moc_optsurvey = MOC()
+        read_moc_fits(moc_optsurvey, opt_moc)
 
     nsources_field = np.full((len(obsids_table),), np.nan)
     hp = HEALPix(nside=2**moc_order, order='nested', frame=ICRS())
@@ -415,6 +394,9 @@ def wise(obsids_table, data_folder, moc_folder, nir_moc=None,
             moc_field = MOC()
             read_moc_fits(moc_field, os.path.join(moc_folder,
                                             '{}.moc'.format(row['OBS_ID'])))
+            if opt_moc is not None:
+                moc_field = moc_optsurvey.intersection(moc_field)
+
             if nir_moc is not None:
                 moc_field = moc_nirsurvey.intersection(moc_field)
 
@@ -439,7 +421,7 @@ def wise(obsids_table, data_folder, moc_folder, nir_moc=None,
     return obsids_table
 
 
-def tmass(obsids_table, data_folder, moc_folder,
+def tmass(obsids_table, data_folder, moc_folder, opt_moc=None,
           radius=15*u.arcmin, moc_order=16, overwrite=True):
     """
     Get 2MASS data using astroquery and Vizier
@@ -455,16 +437,19 @@ def tmass(obsids_table, data_folder, moc_folder,
     an existing file and uses it to calculate the number of WISE sources
     in the field. If it doesn't exist, creates the file.
 
-    The function returns obsids_table with an additional column 'NSRC_2M' with
-    the number of sources in the field.
+    The function returns obsids_table with an additional column 'NSRC_2M'
+    with the number of sources in the field.
     """
-
     # Groups folder
     groups_folder = os.path.join(data_folder, 'groups')
     if not os.path.exists(groups_folder):
         os.makedirs(groups_folder)
 
     moc_folder = os.path.join(moc_folder, 'mocs')
+
+    if opt_moc is not None:
+        moc_optsurvey = MOC()
+        read_moc_fits(moc_optsurvey, opt_moc)
 
     nsources_field = np.full((len(obsids_table),), np.nan)
     hp = HEALPix(nside=2**moc_order, order='nested', frame=ICRS())
@@ -490,9 +475,8 @@ def tmass(obsids_table, data_folder, moc_folder,
             # Fix bug in the vizier response
             # (returns the id as a short int and fails to load
             # properly as an astropy table)
-            fp = open('/tmp/tmp.tab', 'wb')
-            fp.write(vrsp.content)
-            fp.close()
+            with open('/tmp/tmp.tab', 'wb') as tmpfile:
+                tmpfile.write(vrsp.content)
 
             src_table = Table.read('/tmp/tmp.tab', format='ascii.tab')
             src_table = src_table[2:]
@@ -529,6 +513,8 @@ def tmass(obsids_table, data_folder, moc_folder,
             moc_field = MOC()
             read_moc_fits(moc_field, os.path.join(moc_folder,
                                             '{}.moc'.format(row['OBS_ID'])))
+            if opt_moc is not None:
+                moc_field = moc_optsurvey.intersection(moc_field)
 
             inmoc_table = sources_inmoc(src_table_new, hp, moc_field,
                                         moc_order=moc_order,
@@ -552,7 +538,7 @@ def tmass(obsids_table, data_folder, moc_folder,
     return obsids_table
 
 
-def ukidss(obsids_table, data_folder, moc_folder,
+def ukidss(obsids_table, data_folder, moc_folder, opt_moc=None,
            radius=15*u.arcmin, moc_order=16, overwrite=True):
     """
     Get UKIDSS-LAS data using astroquery and the UKIDSS database
@@ -577,6 +563,10 @@ def ukidss(obsids_table, data_folder, moc_folder,
         os.makedirs(groups_folder)
 
     moc_folder = os.path.join(moc_folder, 'mocs')
+
+    if opt_moc is not None:
+        moc_optsurvey = MOC()
+        read_moc_fits(moc_optsurvey, opt_moc)
 
     nsources_field = np.full((len(obsids_table),), np.nan)
     hp = HEALPix(nside=2**moc_order, order='nested', frame=ICRS())
@@ -621,6 +611,8 @@ def ukidss(obsids_table, data_folder, moc_folder,
             moc_field = MOC()
             read_moc_fits(moc_field, os.path.join(moc_folder,
                                             '{}.moc'.format(row['OBS_ID'])))
+            if opt_moc is not None:
+                moc_field = moc_optsurvey.intersection(moc_field)
 
             inmoc_table = sources_inmoc(vrsp, hp, moc_field,
                                         moc_order=moc_order,
@@ -642,7 +634,8 @@ def ukidss(obsids_table, data_folder, moc_folder,
 
     return obsids_table
 
-def vista(obsids_table, data_folder, moc_folder,
+
+def vista(obsids_table, data_folder, moc_folder, opt_moc=None,
           radius=15*u.arcmin, moc_order=16, overwrite=True):
     """
     Get VISTA-VHS data using astroquery and the UKIDSS database
@@ -667,6 +660,10 @@ def vista(obsids_table, data_folder, moc_folder,
         os.makedirs(groups_folder)
 
     moc_folder = os.path.join(moc_folder, 'mocs')
+
+    if opt_moc is not None:
+        moc_optsurvey = MOC()
+        read_moc_fits(moc_optsurvey, opt_moc)
 
     nsources_field = np.full((len(obsids_table),), np.nan)
     hp = HEALPix(nside=2**moc_order, order='nested', frame=ICRS())
@@ -702,6 +699,8 @@ def vista(obsids_table, data_folder, moc_folder,
             moc_field = MOC()
             read_moc_fits(moc_field, os.path.join(moc_folder,
                                             '{}.moc'.format(row['OBS_ID'])))
+            if opt_moc is not None:
+                moc_field = moc_optsurvey.intersection(moc_field)
 
             inmoc_table = sources_inmoc(vrsp, hp, moc_field,
                                         moc_order=moc_order,
