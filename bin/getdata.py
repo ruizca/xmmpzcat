@@ -502,11 +502,11 @@ def tmass(obsids_table, data_folder, moc_folder, opt_moc=None,
                               names=['objID', 'RAJ2000', 'DEJ2000',
                                      'errMaj', 'errMin', 'errPA', 'Qflg'])
             # Filter table
-            flgA = np.core.defchararray.find(src_table['Qflg'], 'A')
-            flgB = np.core.defchararray.find(src_table['Qflg'], 'B')
-            flgC = np.core.defchararray.find(src_table['Qflg'], 'C')
-
-            msk_good = flgA*flgB*flgC == 0
+            # Sources detected with SNR>=5 in J, H or K
+            flgJ = [f[0] in ['A', 'B', 'C'] for f in src_table['Qflg']]
+            flgH = [f[1] in ['A', 'B', 'C'] for f in src_table['Qflg']]
+            flgK = [f[2] in ['A', 'B', 'C'] for f in src_table['Qflg']]
+            msk_good = np.logical_and(flgJ, np.logical_and(flgH, flgK))
             src_table_new = src_table[msk_good]
 
             ## Select sources in the non-overlaping area
