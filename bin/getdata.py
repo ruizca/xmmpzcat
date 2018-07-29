@@ -40,7 +40,6 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None, opt_moc=None,
     (exposure time of the EPIC observation), 'SKY_AREA' (non-overlaping area
     of the observation) and 'NSRC_XMM' (number of X-ray sources in the field).
     """
-
     # Groups folder
     if nir_moc is None:
         groups_folder = os.path.join(data_folder, 'groups')
@@ -114,21 +113,34 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None, opt_moc=None,
                 field_table_file = os.path.join(data_folder, groups_folder,
                                                 '{}.fits'.format(row['OBS_ID']))
                 inmoc_table.keep_columns(['SRCID', rakey, deckey, 'SC_POSERR'])
+                
+                # Correct positional error for xmatch
+                inmoc_table['SC_POSERR'] = inmoc_table['SC_POSERR']/np.srqt(2)                
                 inmoc_table.write(field_table_file, overwrite=True)
 
-    colsrc = Table.Column(nsources_field, name='NSRC_XMM')
-    colarea = Table.Column(area_field*u.deg**2, name='SKY_AREA')
-
-    if 'EP_TEXP' in obsids_table.colnames:
-        obsids_table.add_columns([colarea, colsrc])
-
-    else:
+    if not ('EP_TEXP' in obsids_table.colnames):
         texp_ep = (3.0*obsids_table['PN_TEXP'] +
-                   obsids_table['M1_TEXP'] + obsids_table['M2_TEXP'])/5
-        colexp = Table.Column(texp_ep*u.s, name='EP_TEXP')
-        obsids_table.add_columns([colexp, colarea, colsrc])
+                   obsids_table['M1_TEXP'] + 
+                   obsids_table['M2_TEXP'])/5
 
-    return obsids_table[colsrc > 0]
+        obsids_table['EP_TEXP'] = texp_ep
+
+    obsids_table['SKY_AREA'] = area_field*u.deg**2
+    obsids_table['NSRC_XMM'] = nsources_field
+
+#    colsrc = Table.Column(nsources_field, name='NSRC_XMM')
+#    colarea = Table.Column(area_field*u.deg**2, name='SKY_AREA')
+#
+#    if 'EP_TEXP' in obsids_table.colnames:
+#        obsids_table.add_columns([colarea, colsrc])
+#
+#    else:
+#        texp_ep = (3.0*obsids_table['PN_TEXP'] +
+#                   obsids_table['M1_TEXP'] + obsids_table['M2_TEXP'])/5
+#        colexp = Table.Column(texp_ep*u.s, name='EP_TEXP')
+#        obsids_table.add_columns([colexp, colarea, colsrc])
+
+    return obsids_table[obsids_table['NSRC_XMM'] > 0]
 
 
 def sdss(obsids_table, data_folder, moc_folder, nir_moc=None, data_release=14,
@@ -200,6 +212,11 @@ def sdss(obsids_table, data_folder, moc_folder, nir_moc=None, data_release=14,
             inmoc_table = sources_inmoc(src_table, hp, moc_field,
                                         moc_order=moc_order,
                                         ra='ra', dec='dec', units=u.deg)
+
+            ## Include systematic error
+            inmoc_table['raErr'] = np.sqrt(inmoc_table['raErr']**2 + 0.01)
+            inmoc_table['decErr'] = np.sqrt(inmoc_table['decErr']**2 + 0.01)
+
             ## Save sources
             inmoc_table.remove_columns(['mode'])
             inmoc_table.meta['description'] = 'SDSS'
@@ -403,6 +420,11 @@ def wise(obsids_table, data_folder, moc_folder, nir_moc=None, opt_moc=None,
             inmoc_table = sources_inmoc(vrsp[0], hp, moc_field,
                                         moc_order=moc_order,
                                         ra='RAJ2000', dec='DEJ2000')
+
+            ## Include systematic error
+            inmoc_table['eeMaj'] = np.sqrt(inmoc_table['eeMaj']**2 + 0.01)
+            inmoc_table['eeMin'] = np.sqrt(inmoc_table['eeMin']**2 + 0.01)
+
             ## Save sources
             field_table_file = os.path.join(data_folder, groups_folder,
                                             '{}.fits'.format(row['OBS_ID']))
