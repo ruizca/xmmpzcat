@@ -112,10 +112,7 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None, opt_moc=None,
             if nsources_field[i] > 0:
                 field_table_file = os.path.join(data_folder, groups_folder,
                                                 '{}.fits'.format(row['OBS_ID']))
-                inmoc_table.keep_columns(['SRCID', rakey, deckey, 'SC_POSERR'])
-                
-                # Correct positional error for xmatch
-                inmoc_table['SC_POSERR'] = inmoc_table['SC_POSERR']/np.srqt(2)                
+                inmoc_table.keep_columns(['SRCID', rakey, deckey, 'SC_POSERR'])                
                 inmoc_table.write(field_table_file, overwrite=True)
 
     if not ('EP_TEXP' in obsids_table.colnames):
@@ -212,11 +209,6 @@ def sdss(obsids_table, data_folder, moc_folder, nir_moc=None, data_release=14,
             inmoc_table = sources_inmoc(src_table, hp, moc_field,
                                         moc_order=moc_order,
                                         ra='ra', dec='dec', units=u.deg)
-
-            ## Include systematic error
-            inmoc_table['raErr'] = np.sqrt(inmoc_table['raErr']**2 + 0.01)
-            inmoc_table['decErr'] = np.sqrt(inmoc_table['decErr']**2 + 0.01)
-
             ## Save sources
             inmoc_table.remove_columns(['mode'])
             inmoc_table.meta['description'] = 'SDSS'
@@ -420,11 +412,6 @@ def wise(obsids_table, data_folder, moc_folder, nir_moc=None, opt_moc=None,
             inmoc_table = sources_inmoc(vrsp[0], hp, moc_field,
                                         moc_order=moc_order,
                                         ra='RAJ2000', dec='DEJ2000')
-
-            ## Include systematic error
-            inmoc_table['eeMaj'] = np.sqrt(inmoc_table['eeMaj']**2 + 0.01)
-            inmoc_table['eeMin'] = np.sqrt(inmoc_table['eeMin']**2 + 0.01)
-
             ## Save sources
             field_table_file = os.path.join(data_folder, groups_folder,
                                             '{}.fits'.format(row['OBS_ID']))
