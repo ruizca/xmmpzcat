@@ -113,7 +113,7 @@ def xmm(obsids_table, data_folder, src_filename, nir_moc=None, opt_moc=None,
             if nsources_field[i] > 0:
                 field_table_file = os.path.join(data_folder, groups_folder,
                                                 '{}.fits'.format(row['OBS_ID']))
-                inmoc_table.keep_columns(['SRCID', raCol, decCol, 'SC_POSERR'])
+                inmoc_table.keep_columns(['SRCID', rakey, deckey, 'SC_POSERR'])
                 inmoc_table.write(field_table_file, overwrite=True)
 
     colsrc = Table.Column(nsources_field, name='NSRC_XMM')
