@@ -75,7 +75,7 @@ def makeXmsFile(catalogues, prefixes, completeness):
 
         xms_cmd += '\nget FileLoader file=temp_{}.fits\n'.format(prefixes[i])
         xms_cmd += 'set pos ra={} dec={}\n'.format(cols[1], cols[2])
-        xms_cmd += 'set poserr type={}'.format(cat.meta['errortype'].upper())
+        xms_cmd += 'set poserr type={}'.format(cat.meta['ERRTYPE'].upper())
         xms_cmd += ''.join(' param{:d}={}'.format(j+1, p)
                            for j, p in enumerate(cols[3:]))
         xms_cmd += '\nset cols {}\n'.format(cols[0])
@@ -97,16 +97,16 @@ def xmatch(*catalogues, **kwargs):
     Postional cross-matching of the catalogues in *catalogues. Each
     catalogue in the list should be an astropy Table with the following
     structure:
-        col1 : source id
-        col2 : ra in degrees
-        col3 : dec in degrees
-        col4 : err_param1
-        col5 : err_param2 (optional)
-        col6 : err_param3 (optional)
+        col1: source id
+        col2: ra in degrees
+        col3: dec in degrees
+        col4: err_param1
+        col5: err_param2 (optional)
+        col6: err_param3 (optional)
 
     All tables should have at least two meta keywords, one named "AREA",
     with the area in squared degrees covered by the catalogue, and one
-    named "errortype", having one of these values: "circle", "ellipse",
+    named "ERRTYPE", having one of these values: "circle", "ellipse",
     "rcd_dec_ellipse", "cov_ellipse" or "cor_ellipse".
 
     The number of error parameters depends on errortype:

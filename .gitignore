@@ -1,8 +1,10 @@
 bin/CasJobs.config
-data/
-xmatch/
+*_data/
+*_xmatch/
 plots/
 photoz/
+bin/temp*
+bin/.logcookie
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -178,7 +178,7 @@ def sdss(obsids_table, data_folder, moc_folder, nir_moc=None, data_release=14,
 
     nsources_field = np.full((len(obsids_table),), np.nan)
     hp = HEALPix(nside=2**moc_order, order='nested', frame=ICRS())
-    photoobj_fields = ['objid', 'mode', 'ra', 'dec', 'raErr', 'decErr']
+    photoobj_fields = ['objID', 'mode', 'ra', 'dec', 'raErr', 'decErr']
 
     for i, row in enumerate(tqdm(obsids_table,
                                  desc="Making SDSS groups")):

@@ -13,9 +13,14 @@ from pymoc.io.fits import read_moc_fits
 from tqdm import trange, tqdm
 import numpy as np
 
+from utils import obsid_wcs
+
 
 def sort_exptime(table):
-    # Calculate EPIC exposure time and sort the obsids
+    """
+    Calculate the EPIC exposure time and sort the obsids
+    in table by this value, in ascending order.
+    """
     texp_m1 = table['M1_TEXP']
     texp_m2 = table['M2_TEXP']
     texp_pn = table['PN_TEXP']
@@ -38,10 +43,9 @@ def basic_moc(field, overlap, radius, moc_order=15):
     """
     Circular MOC for field, removing other overlapping fields if they exist.
     """
-    if len(overlap):
-        moc_originalField = catalog_to_moc(field, radius, moc_order)
-        moc_bad = catalog_to_moc(overlap, radius, moc_order)
-        moc_field = moc_originalField - moc_bad
+    if overlap:
+        moc_field = catalog_to_moc(field, radius, moc_order)
+        moc_field -= catalog_to_moc(overlap, radius, moc_order)
 
     else:
         moc_field = catalog_to_moc(field, radius, moc_order)
@@ -51,22 +55,22 @@ def basic_moc(field, overlap, radius, moc_order=15):
 
 def galaxies_moc(field, moc_field, radius, moc_order=15):
     """
-    MOC with the intersection of field with the galaxies
-    included in the 2MASS Large Galaxy Atlas
+    MOC with the intersection of field with galaxies
+    included in the 2MASS Large Galaxy Atlas.
     """
     galaxies = Irsa.query_region(field, catalog="lga_v2",
                                  spatial="Cone", radius=2*u.deg)
     moc_galaxies = MOC()
-    if len(galaxies):
+    if galaxies:
         w = obsid_wcs(field)
         field_reg = CircleSkyRegion(center=field, radius=radius)
 
         moc_galaxies = MOC()
         for g in galaxies:
             gcoords = SkyCoord(ra=g['ra'], dec=g['dec'], unit=u.deg)
-            errMaj = 1.5*2*g['r_ext']*u.arcsec
+            amajor = 1.5*2*g['r_ext']*u.arcsec
             galaxy_reg = EllipseSkyRegion(center=gcoords,
-                            width=errMaj, height=errMaj*g['sup_ba'],
+                            width=amajor, height=amajor*g['sup_ba'],
                             angle=(90 + g['sup_pa'])*u.deg)
 
             region = field_reg.intersection(galaxy_reg)
@@ -87,7 +91,7 @@ def stars_moc(field, radius, moc_order=15):
     vrsp = v.query_region(field, radius=(radius + 1.5*u.arcmin), catalog='I/305')
 
     moc_stars = MOC()
-    if len(vrsp) > 0:
+    if vrsp:
         stars = vrsp[0]
         stars_coords = SkyCoord(ra=stars['RAJ2000'], dec=stars['DEJ2000'])
         stars_radius = (16 - stars['Vmag'])*6*u.arcsec # Aird+2015
@@ -170,5 +174,3 @@ def make_binmocs(obsids_table, data_folder, bincol='BIN_ID'):
             moc_bin += moc_field
 
         moc_bin.write(binmoc_filename, filetype="FITS", overwrite=True)
-
-

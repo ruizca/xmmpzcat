@@ -21,7 +21,6 @@ def calc_optstats(bin_sources, reg, density, gal_lat, nsrckey='NSRC_PS'):
     Statistics of the optical bin.
     """
     region_stats = np.full((8), np.nan)
-
     region_stats[0] = np.median(density)
     region_stats[1] = 1.4826*np.median(np.abs(density - region_stats[0]))
     region_stats[2] = np.median(np.abs(gal_lat.value))
@@ -39,7 +38,6 @@ def calc_xstats(bin_sources, binid):
     Statistics of the X-ray bin.
     """
     region_stats = np.full((8), np.nan)
-
     region_stats[0] = binid
     region_stats[1] = np.median(bin_sources['EP_TEXP'])
     region_stats[2] = np.min(bin_sources['EP_TEXP'])
@@ -76,27 +74,15 @@ def optical(obsids_table, data_folder, nir_survey='2MASS',
 
     region_stats = np.full((len(regions), 8), np.nan)
     msk_outliers = np.array(len(obsids_table)*[False])
-    optbins = np.array(len(obsids_table)*['kk'], dtype='object')
+    optbins = np.array(len(obsids_table)*['kkkkkkkk'])
 
     for i, reg in enumerate(regions):
         msk_reg = np.logical_and(np.abs(gal_lat) >= reg[0],
                                  np.abs(gal_lat) < reg[1])
 
-        #bin_table = obsids_table[msk_reg]
         region_stats[i, :] = calc_optstats(obsids_table[msk_reg], reg,
                                            density[msk_reg], gal_lat[msk_reg],
                                            nsrckey=nsrckey)
-#        median = np.median(density[msk_reg])
-#        smad = 1.4826*np.median(np.abs(density[msk_reg] - median))
-#
-#        region_stats[i, 0] = median
-#        region_stats[i, 1] = smad
-#        region_stats[i, 2] = np.median(np.abs(gal_lat[msk_reg].value))
-#        region_stats[i, 3] = region_stats[i, 2] - reg[0].value
-#        region_stats[i, 4] = reg[1].value - region_stats[i, 2]
-#        region_stats[i, 5] = np.sum(bin_table['SKY_AREA'])
-#        region_stats[i, 6] = np.sum(bin_table[nsrckey])
-#        region_stats[i, 7] = len(bin_table)
 
         # Find density outliers outside the Galactic plane
         if reg[1] > 20*u.deg:
@@ -105,15 +91,10 @@ def optical(obsids_table, data_folder, nir_survey='2MASS',
             bin_outliers = np.logical_and(msk_reg, bin_outliers)
             msk_outliers = np.logical_or(msk_outliers, bin_outliers)
 
-        optbins[msk_reg] = 'bin{:02d}:{:02d}'.format(int(reg[0].value),
+        optbins[msk_reg] = 'bin{:02d}_{:02d}'.format(int(reg[0].value),
                                                      int(reg[1].value))
-
     obsids_table['SKY_OUTLIER'] = msk_outliers
     obsids_table['OPTBIN'] = optbins
-
-#    col_outliers = Table.Column(msk_outliers, name='SKY_OUTLIER')
-#    col_optbins = Table.Column(optbins, name='OPTBIN', dtype='str')
-#    obsids_table.add_columns([col_outliers, col_optbins])
 
 #    plt.figure()
 #    plt.plot(np.abs(gal_lat), density, lw=0, marker='.', ms=2)
@@ -147,7 +128,7 @@ def xrays(obsids_table, min_fields, binid_start):
     obsids_table.sort('EP_TEXP')
     nbins = int(len(obsids_table)/int(min_fields))
     stats = np.full((nbins, 8), np.nan)
-    binid = np.full((len(obsids_table),), np.nan)
+    binid = np.full((len(obsids_table),), np.nan, dtype=int)
 
     j = 0
     for i in range(nbins):
@@ -158,14 +139,6 @@ def xrays(obsids_table, min_fields, binid_start):
             bin_table = obsids_table[j:j+min_fields]
             binid[j:j + min_fields] = binid_start + i
 
-#        avetexp = np.median(bin_table['EP_TEXP'])
-#        mintexp = np.min(bin_table['EP_TEXP'])
-#        maxtexp = np.max(bin_table['EP_TEXP'])
-#        area = np.sum(bin_table['SKY_AREA'])
-#        nsrc = np.sum(bin_table['NSRC_XMM'])
-#        stats[i, :] = [binid_start + i, avetexp, mintexp, maxtexp,
-#                       nsrc, area, nsrc/area, len(bin_table)]
-
         stats[i, :] = calc_xstats(bin_table, binid_start + i)
         j += min_fields
 
@@ -173,7 +146,7 @@ def xrays(obsids_table, min_fields, binid_start):
                                       'MAX_TEXP', 'NSRC_XMM', 'SKY_AREA',
                                       'SKY_DENSITY_XMM', 'NFIELDS'])
 
-    obsids_table['BIN_ID'] = binid
+    obsids_table['BIN_ID'] = binid.astype(int)
 #    binid_col = Table.Column(binid, name='BIN_ID')
 #    obsids_table.add_column(binid_col)
 
@@ -256,7 +229,7 @@ def makebins(obsids_table, data_folder, desctag, nir_survey='2MASS',
         for i, obs in enumerate(bin_table):
             group_file = '{}.fits'.format(obs['OBS_ID'])
             group_file = os.path.join(groups_folder, group_file)
-            tables_array[i] = Table.read(group_file, memmap=True)
+            tables_array[i] = Table.read(group_file)
 
         bin_srcs = vstack(tables_array)
         bin_srcs.meta['AREA'] = np.sum(bin_table['SKY_AREA'])

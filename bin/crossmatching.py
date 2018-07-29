@@ -47,9 +47,11 @@ def xm_folders(xmatch_folder, opt_survey='pstarrs', nir_survey='2MASS'):
 def merge_cats(folder_dict, opt_survey='pstarrs', opt_label='PS',
                nir_survey='2MASS', nir_label='NTM'):
 
-    catdir = xm_folders(folder_dict['xmatch'], nir_survey)
-    optid = '{}objID'.format(opt_label)
+    catdir = xm_folders(folder_dict['xmatch'], opt_survey, nir_survey)
+    #optid = '{}objID'.format(opt_label)
+    optid = '{}objid'.format(opt_label)
     nirid = '{}objID'.format(nir_label)
+    otag = opt_survey[0].upper()
 
     xo_cat = Table.read('{}.fits'.format(catdir['2cat']))
     xow_cat = Table.read('{}.fits'.format(catdir['3catmir']))
@@ -58,40 +60,48 @@ def merge_cats(folder_dict, opt_survey='pstarrs', opt_label='PS',
 
     # Sources in XOW but not in XOWN
     XOW_notXOWN = setdiff(xow_cat, xown_cat, keys=['XMMSRCID', optid, 'WSID'])
-    XOW_notXOWN.rename_column('chi2Pos', 'chi2Pos_XOW')
+    XOW_notXOWN.rename_column('chi2Pos', 'chi2Pos_X{}W'.format(otag))
 
     # Sources in XON but not in XOWN
     XON_notXOWN = setdiff(xon_cat, xown_cat, keys=['XMMSRCID', optid, nirid])
-    XON_notXOWN.rename_column('chi2Pos', 'chi2Pos_XON')
+    XON_notXOWN.rename_column('chi2Pos', 'chi2Pos_X{}N'.format(otag))
 
     # Add 3-cat probabilities to common sources between XOWT and XOW
-    xow_cat_temp = xow_cat[['chi2Pos', 'proba_XOW', 'XMMSRCID', optid, 'WSID']]
-    xow_cat_temp.rename_column('chi2Pos', 'chi2Pos_XOW')
-    xown_cat.remove_column('proba_XOW')
-    xown_cat.rename_column('chi2Pos', 'chi2Pos_XOWN')
+    xow_cat_temp = xow_cat[['chi2Pos', 'proba_X{}W'.format(otag),
+                            'XMMSRCID', optid, 'WSID']]
+    xow_cat_temp.rename_column('chi2Pos', 'chi2Pos_X{}W'.format(otag))
+    xown_cat.remove_column('proba_X{}W'.format(otag))
+    xown_cat.rename_column('chi2Pos', 'chi2Pos_X{}WN'.format(otag))
     XOWN_probaXOW = join(xown_cat, xow_cat_temp, join_type='left',
                          keys=['XMMSRCID', optid, 'WSID'])
 
     # Add 3-cat probabilities to common sources between XOWT and XON
-    xon_cat_temp = xon_cat[['chi2Pos', 'proba_XON', 'XMMSRCID', optid, nirid]]
-    xon_cat_temp.rename_column('chi2Pos', 'chi2Pos_XON')
-    XOWN_probaXOW.remove_column('proba_XPN')
+    xon_cat_temp = xon_cat[['chi2Pos', 'proba_X{}N'.format(otag), 
+                            'XMMSRCID', optid, nirid]]
+    xon_cat_temp.rename_column('chi2Pos', 'chi2Pos_X{}N'.format(otag))
+    XOWN_probaXOW.remove_column('proba_X{}N'.format(otag))
     XOWN_probaXOW_probaXON = join(XOWN_probaXOW, xon_cat_temp, join_type='left',
                                   keys=['XMMSRCID', optid, nirid])
 
     # Concat tables
     XOW_notXOWN.keep_columns(['posRA', 'posDec', 'ePosA', 'ePosB', 'ePosPA',
-                              'chi2Pos_XOW', 'proba_XOW', 'nPos',
-                              'XMMSRCID', optid, 'WSID'])
+                              'chi2Pos_X{}W'.format(otag),
+                              'proba_X{}W'.format(otag),
+                              'nPos', 'XMMSRCID', optid, 'WSID'])
 
     XON_notXOWN.keep_columns(['posRA', 'posDec', 'ePosA', 'ePosB', 'ePosPA',
-                              'chi2Pos_XON', 'proba_XON', 'nPos',
+                              'chi2Pos_X{}N'.format(otag),
+                              'proba_X{}N'.format(otag), 'nPos',
                               'XMMSRCID', optid, nirid])
 
     XOWN_probaXOW_probaXON.keep_columns(
                              ['posRA', 'posDec', 'ePosA', 'ePosB', 'ePosPA',
-                              'chi2Pos_XOW', 'proba_XOW', 'chi2Pos_XON',
-                              'proba_XON', 'chi2Pos_XOWN', 'proba_XOWN',
+                              'chi2Pos_X{}W'.format(otag), 
+                              'proba_X{}W'.format(otag), 
+                              'chi2Pos_X{}N'.format(otag),
+                              'proba_X{}N'.format(otag), 
+                              'chi2Pos_X{}WN'.format(otag), 
+                              'proba_X{}WN'.format(otag),
                               'nPos', 'XMMSRCID', optid, 'WSID', nirid])
 
     XOWN_XOW_XON = vstack([XOWN_probaXOW_probaXON, XOW_notXOWN, XON_notXOWN])
@@ -99,18 +109,20 @@ def merge_cats(folder_dict, opt_survey='pstarrs', opt_label='PS',
     # Sources in XO but not XOWN_XOW_XON
     XO_notXOWN_XOW_XON = setdiff(xo_cat, XOWN_XOW_XON, 
                                  keys=['XMMSRCID', optid])
-    XO_notXOWN_XOW_XON.rename_column('chi2Pos', 'chi2Pos_XO')
+    XO_notXOWN_XOW_XON.rename_column('chi2Pos', 'chi2Pos_X{}'.format(otag))
 
     # Add 2-cat probabilities to common sources between XO and XOWN_XOW_XON
-    xo_cat_temp = xo_cat[['chi2Pos', 'proba_XO', 'XMMSRCID', optid]]
-    xo_cat_temp.rename_column('chi2Pos', 'chi2Pos_XO')
+    xo_cat_temp = xo_cat[['chi2Pos', 'proba_X{}'.format(otag), 
+                          'XMMSRCID', optid]]
+    xo_cat_temp.rename_column('chi2Pos', 'chi2Pos_X{}'.format(otag))
     XOWN_XOW_XON_probaXO = join(XOWN_XOW_XON, xo_cat_temp, join_type='left',
                                 keys=['XMMSRCID', optid])
     
     # Concat tables
     XO_notXOWN_XOW_XON.keep_columns(
                             ['posRA', 'posDec', 'ePosA', 'ePosB', 'ePosPA',
-                             'chi2Pos_XO', 'proba_XO', 'nPos', 
+                             'chi2Pos_X{}'.format(otag), 
+                             'proba_X{}'.format(otag), 'nPos', 
                              'XMMSRCID', optid])
 
     merged_cat = vstack([XOWN_XOW_XON_probaXO, XO_notXOWN_XOW_XON])
